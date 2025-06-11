@@ -3,6 +3,7 @@ version: "3.9"
 services:
   db:
     image: postgres:15
+    container_name: abobot_db
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -11,15 +12,41 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - abobot_net
 
   bot:
     build: .
+    container_name: abobot_bot
     env_file:
       - .env
     depends_on:
       - db
+      - alembic
     environment:
       DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - abobot_net
+
+  alembic:
+    build:
+      context: .
+    container_name: abobot-alembic
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+    networks:
+      - abobot_net
+
+
+networks:
+  abobot_net:
+    driver: bridge
 
 volumes:
   pgdata:
