@@ -1,48 +1,38 @@
-# models.py
-from sqlalchemy import Column, Integer, String, ForeignKey, Table, DateTime, Text
-from sqlalchemy.orm import relationship, declarative_base
-import datetime
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import String, Integer, Enum, ForeignKey, DateTime, BigInteger
+from enum import Enum as PyEnum
+from datetime import datetime
 
-Base = declarative_base()
+from app.database import Base
 
-user_roles = Table(
-    "user_roles", Base.metadata,
-    Column("user_id", ForeignKey("users.id"), primary_key=True),
-    Column("role_id", ForeignKey("roles.id"), primary_key=True)
-)
-
-dialog_users = Table(
-    "dialog_users", Base.metadata,
-    Column("dialog_id", ForeignKey("dialogs.id"), primary_key=True),
-    Column("user_id", ForeignKey("users.id"), primary_key=True)
-)
+class UserRole(PyEnum):
+    ADMIN = "admin"
+    USER = "user"
+    # Добавьте другие роли по необходимости
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
-    roles = relationship("Role", secondary=user_roles, back_populates="users")
-    dialogs = relationship("Dialog", secondary=dialog_users, back_populates="users")
-    messages = relationship("Message", back_populates="sender")
+    telegram_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=True)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class Role(Base):
-    __tablename__ = "roles"
-    id = Column(Integer, primary_key=True)
-    name = Column(String, unique=True, nullable=False)
-    users = relationship("User", secondary=user_roles, back_populates="roles")
+    dialog = relationship("Dialog", back_populates="user", uselist=False)
 
 class Dialog(Base):
     __tablename__ = "dialogs"
-    id = Column(Integer, primary_key=True)
-    users = relationship("User", secondary=dialog_users, back_populates="dialogs")
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="dialog")
     messages = relationship("Message", back_populates="dialog")
 
 class Message(Base):
     __tablename__ = "messages"
-    id = Column(Integer, primary_key=True)
-    dialog_id = Column(Integer, ForeignKey("dialogs.id"), nullable=False)
-    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    content = Column(Text, nullable=False)
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    text: Mapped[str] = mapped_column(String(4096))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    dialog_id: Mapped[int] = mapped_column(ForeignKey("dialogs.id"))
+
     dialog = relationship("Dialog", back_populates="messages")
-    sender = relationship("User", back_populates="messages")
