@@ -1,40 +1,16 @@
 from aiogram import Router, types
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
-from sqlalchemy import select, desc
+from sqlalchemy import select
 from app.models import User, Message, Dialog
 from app.database import async_session_maker
 from datetime import datetime
-from sqlalchemy.orm import selectinload
 
 
 router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
-    userid = message.from_user.id
-    async with async_session_maker() as session:
-        # Проверяем, есть ли пользователь
-        result = await session.execute(select(User).where(User.telegram_id == userid))
-        user = result.scalar_one_or_none()
-        if not user:
-            user = User(telegram_id=userid)
-            session.add(user)
-            await session.flush()  # Получаем user.id
-
-        # Проверяем, есть ли диалог
-        result = await session.execute(select(Dialog).where(Dialog.user_id == userid))
-        dialog = result.scalar_one_or_none()
-        if not dialog:
-            dialog = Dialog(user_id=userid)
-            session.add(dialog)
-            await session.flush()
-
-        # Добавляем приветственное сообщение
-        message_obj = Message(dialog_id=dialog.id, text="Абоба!", created_at=datetime.now())
-        session.add(message_obj)
-        await session.commit()
-
     await message.answer("Абоба!")
 
 @router.message(Command("reply"))
@@ -63,6 +39,42 @@ async def cmd_help(message: types.Message):
         "/help - Показать это сообщение"
     )
     await message.answer(help_text)
+
+@router.message(Command("re_chat"))
+async def cmd_re_chat(message: types.Message):
+    userid = message.from_user.id
+    async with async_session_maker() as session:
+        # Получаем пользователя
+        result = await session.execute(select(User).where(User.telegram_id == userid))
+        user = result.scalar_one_or_none()
+        if not user:
+            await message.answer("Нет сохранённых сообщений.")
+            return
+
+        # Получаем диалог
+        result = await session.execute(select(Dialog).where(Dialog.user_id == userid))
+        dialog = result.scalar_one_or_none()
+        if not dialog:
+            await message.answer("Нет сохранённых сообщений.")
+            return
+
+        # Получаем последние 10 сообщений в обратном порядке
+        result = await session.execute(
+            select(Message)
+            .where(Message.dialog_id == dialog.id)
+            .order_by(Message.created_at.desc())
+            .limit(10)
+        )
+        messages = result.scalars().all()
+        if not messages:
+            await message.answer("Нет сохранённых сообщений.")
+            return
+
+        # Формируем текст
+        text = "\n\n".join(
+            f"{msg.created_at.strftime('%d.%m.%Y %H:%M:%S')}: {msg.text}" for msg in messages
+        )
+        await message.answer(f"Последние сообщения:\n\n{text}")
 
 @router.message()
 async def save_message(message: types.Message):
@@ -93,40 +105,6 @@ async def save_message(message: types.Message):
         session.add(msg)
         await session.commit()
 
-@router.message(Command('re_chat'))
-async def re_chat(message: types.Message):
-    try:
-        if message.from_user:
-            user_id = message.from_user.id
-        else:
-            raise Exception("message.from_user пуст!")
-    except ValueError:
-        await message.answer("ID должен быть числом.")
-        return
-    except Exception:
-        await message.answer("Сообщение пусто.")
-        return
-
-    try:
-        async with get_session() as session:
-            result = await session.execute(
-                text(
-                    "SELECT m.text, m.created_at FROM messages m "
-                    "JOIN dialogs d ON m.dialog_id = d.id "
-                    "WHERE d.user_id = :uid "
-                    "ORDER BY m.created_at DESC"
-                ),
-                {'uid': user_id}
-            )
-            messages = result.fetchall()
-            if not messages:
-                await message.answer("У этого пользователя сообщений нет.")
-                return
-            for text_msg, created in messages:
-                dt_str = created.strftime("%d.%m.%Y %H:%M")
-                await message.answer(f"🕒 {dt_str}\n📝 {text_msg}")
-    except Exception as e:
-        await message.answer(f"Ошибка: {str(e)}")
 
 
 @router.message()
