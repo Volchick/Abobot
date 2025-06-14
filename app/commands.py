@@ -1,13 +1,17 @@
-from aiogram import Router, types
+from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
-from sqlalchemy import select
+from sqlalchemy import select, desc
 from app.models import User, Message, Dialog
 from app.database import async_session_maker
+from app.config_reader import GPT_TOKEN, GPT_CONTEXT
 from datetime import datetime
+from openai import AsyncOpenAI, AuthenticationError, RateLimitError
 
 
 router = Router()
+client = AsyncOpenAI(api_key=GPT_TOKEN)
+user_histories = {}
 
 @router.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -36,6 +40,8 @@ async def cmd_help(message: types.Message):
         "/aboba - Отправить картинку с лягушкой\n"
         "/gael - Отправить картинку с гномом\n"
         "/re_chat - Показать последние 10 сообщений в диалоге\n"
+        "/gpt_start - Включить режим общения с ChatGPT\n"
+        "/gpt_stop - Выключить режим общения с ChatGPT\n"
         "/help - Показать это сообщение"
     )
     await message.answer(help_text)
@@ -76,15 +82,37 @@ async def cmd_re_chat(message: types.Message):
         )
         await message.answer(f"Последние сообщения:\n\n{text}")
 
+@router.message(Command("gpt_start"))
+async def cmd_chatgpt(message: types.Message):
+    userid = message.from_user.id
+    user_histories[userid] = [
+        {"role": "system", "content": GPT_CONTEXT}
+    ]
+    await message.answer("Режим общения с ChatGPT активирован. Для выхода напишите /gpt_stop.")
+
+@router.message(Command("gpt_stop"))
+async def cmd_chatgpt_stop(message: types.Message):
+    userid = message.from_user.id
+    if userid in user_histories:
+        user_histories.pop(userid)
+        await message.answer("Режим общения с ChatGPT выключен.")
+    else:
+        await message.answer("Режим общения с ChatGPT не был активирован.")
+
 @router.message()
-async def save_message(message: types.Message):
+async def chatgpt_and_save(message: types.Message):
     userid = message.from_user.id
     text = message.text
+    known_commands = {"/start", "/reply", "/aboba", "/gael", "/help", "/re_chat", "/gpt_start", "/gpt_stop"}
+    if text and text.startswith("/") and text.split()[0] not in known_commands:
+        await message.answer("Неизвестная команда. Напишите /help для списка доступных команд.")
+        return
     if not text or text.startswith('/'):
-        return  # Не сохраняем команды и пустые сообщения
+        return
 
+    # Сохраняем сообщение пользователя в базу
     async with async_session_maker() as session:
-        # Ищем или создаём пользователя
+        # Получаем или создаём пользователя
         result = await session.execute(select(User).where(User.telegram_id == userid))
         user = result.scalar_one_or_none()
         if not user:
@@ -92,7 +120,7 @@ async def save_message(message: types.Message):
             session.add(user)
             await session.flush()
 
-        # Ищем или создаём диалог
+        # Получаем или создаём диалог
         result = await session.execute(select(Dialog).where(Dialog.user_id == userid))
         dialog = result.scalar_one_or_none()
         if not dialog:
@@ -100,14 +128,38 @@ async def save_message(message: types.Message):
             session.add(dialog)
             await session.flush()
 
-        # Сохраняем сообщение
+        # Сохраняем сообщение пользователя
         msg = Message(dialog_id=dialog.id, text=text, created_at=datetime.now())
         session.add(msg)
         await session.commit()
 
+    # Если режим ChatGPT не активен — просто сохраняем сообщение
+    if userid not in user_histories:
+        return
 
+    # Проверка на выход из режима
+    if text.lower() in ("выход", "exit", "/stop"):
+        user_histories.pop(userid, None)
+        await message.answer("Режим чата завершён.")
+        return
 
-@router.message()
-async def unknown_command(message: types.Message):
-    if message.text and message.text.startswith('/'):
-        await message.reply("Неизвестная команда. Используйте /help, чтобы увидеть список команд.")
+    # Добавляем сообщение в историю и отправляем в ChatGPT
+    user_histories[userid].append({"role": "user", "content": text})
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=user_histories[userid],
+            max_tokens=500
+        )
+        answer = response.choices[0].message.content.strip()
+        await message.answer(answer)
+        user_histories[userid].append({"role": "assistant", "content": answer})
+    except AuthenticationError:
+        await message.answer("Ошибка: неверный API-ключ OpenAI.")
+        user_histories.pop(userid, None)
+    except RateLimitError:
+        await message.answer("Ошибка: превышен лимит запросов к OpenAI API.")
+        user_histories.pop(userid, None)
+    except Exception as e:
+        await message.answer(f"Произошла ошибка: {e}")
+        user_histories.pop(userid, None)
