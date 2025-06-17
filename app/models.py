@@ -16,7 +16,10 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), nullable=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
+    vk_code_verifier: Mapped[str] = mapped_column(String, nullable=True)
+    vk_access_token: Mapped[str] = mapped_column(String, nullable=True)
+    vk_refresh_token: Mapped[str] = mapped_column(String, nullable=True)
+    vk_user_id: Mapped[int] = mapped_column(Integer, nullable=True)
     dialog = relationship("Dialog", back_populates="user", uselist=False)
 
 class Dialog(Base):

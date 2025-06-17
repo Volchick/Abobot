@@ -1,10 +1,11 @@
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import FSInputFile
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, desc
 from app.models import User, Message, Dialog
 from app.database import async_session_maker
-from app.config_reader import GPT_TOKEN, GPT_CONTEXT
+from app.config_reader import GPT_TOKEN, GPT_CONTEXT, VK_CLIENT_ID, VK_REDIRECT_URI
 from datetime import datetime
 from openai import AsyncOpenAI, AuthenticationError, RateLimitError
 
@@ -42,6 +43,7 @@ async def cmd_help(message: types.Message):
         "/re_chat - Показать последние 10 сообщений в диалоге\n"
         "/gpt_start - Включить режим общения с ChatGPT\n"
         "/gpt_stop - Выключить режим общения с ChatGPT\n"
+        "/vk_auth - Авторизация через VK\n"
         "/help - Показать это сообщение"
     )
     await message.answer(help_text)
@@ -98,6 +100,31 @@ async def cmd_chatgpt_stop(message: types.Message):
         await message.answer("Режим общения с ChatGPT выключен.")
     else:
         await message.answer("Режим общения с ChatGPT не был активирован.")
+
+@router.message(Command("vk_auth"))
+async def cmd_auth(message: types.Message):
+    try:
+        client_id = VK_CLIENT_ID
+        redirect_uri = VK_REDIRECT_URI
+        scope = "offline"  # offline для получения refresh_token
+
+        # Формируем URL для авторизации в точном требуемом формате
+        auth_url = f'https://oauth.vk.com/oauth/authorize?client_id={client_id}&redirect_uri={redirect_uri}&scope={scope}&response_type=code&state={message.from_user.id}'
+
+        # Создаем кнопку для авторизации
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(
+            text="🔑 Авторизоваться через VK",
+            url=auth_url
+        ))
+
+        await message.answer(
+            "Для авторизации через VK нажмите кнопку ниже:",
+            reply_markup=builder.as_markup()
+        )
+
+    except Exception as e:
+        await message.answer("Произошла ошибка при создании ссылки авторизации")
 
 @router.message()
 async def chatgpt_and_save(message: types.Message):

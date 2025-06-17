@@ -40,6 +40,26 @@ services:
       - .env
     depends_on:
       - db
+    restart: always
+    networks:
+      - abobot_net
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      VK_REDIRECT_URI: ${VK_REDIRECT_URI}
+    env_file: .env
+    depends_on:
+      - bot
+    volumes:
+      - .:/app
     networks:
       - abobot_net
 
