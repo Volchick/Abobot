@@ -6,8 +6,11 @@ from app.database import get_async_session
 from app.models import User
 import httpx
 from fastapi.responses import HTMLResponse
+from app.middleware import VKRateLimitMiddleware
+
 
 app = FastAPI()
+app.add_middleware(VKRateLimitMiddleware)
 
 # Обрабатывает callback от VK OAuth.
 @app.get("/vk/callback")
